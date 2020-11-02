@@ -23,6 +23,8 @@ import (
 
 	"github.com/xueqiu/rdr/decoder"
 	"github.com/xueqiu/rdr/dump"
+
+	"strconv"
 )
 
 //go:generate go-bindata -prefix "static/" -o=static/static.go -pkg=static -ignore static.go static/...
@@ -41,6 +43,59 @@ func keys(c *cli.Context) {
 		go dump.Decode(c, decoder, filepath)
 		for e := range decoder.Entries {
 			fmt.Fprintf(c.App.Writer, "%v\n", e.Key)
+		}
+	}
+}
+
+func topkey(c *cli.Context) {
+	var (
+		keysNums      int    = 50
+		keysDelimiter string = "[:DMR:]"
+		minSize       uint64
+		filepath      string
+	)
+	if c.NArg() == 1 {
+		filepath = c.Args()[0]
+	} else if c.NArg() == 2 {
+		filepath = c.Args()[0]
+		keysNums, _ = strconv.Atoi(c.Args()[1])
+	} else if c.NArg() == 3 {
+		filepath = c.Args()[0]
+		keysNums, _ = strconv.Atoi(c.Args()[1])
+		minSize, _ = strconv.ParseUint(c.Args()[2], 10, 64)
+	} else if c.NArg() == 4 {
+		keysDelimiter = c.Args()[3]
+		minSize, _ = strconv.ParseUint(c.Args()[2], 10, 64)
+		keysNums, _ = strconv.Atoi(c.Args()[1])
+		filepath = c.Args()[0]
+	} else if c.NArg() == 5 {
+		logfile, err := os.OpenFile(c.Args()[4], os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
+		if err != nil {
+			fmt.Fprintln(c.App.ErrWriter, "%v\n", err)
+			cli.ShowCommandHelp(c, "topkeys")
+			return
+		}
+		c.App.Writer = logfile
+		keysDelimiter = c.Args()[3]
+		minSize, _ = strconv.ParseUint(c.Args()[2], 10, 64)
+		keysNums, _ = strconv.Atoi(c.Args()[1])
+		filepath = c.Args()[0]
+	} else {
+		fmt.Fprintln(c.App.ErrWriter, "keys requires at least 1 argument")
+		cli.ShowCommandHelp(c, "topkey")
+		return
+	}
+
+	decoder := decoder.NewDecoder()
+	go dump.Decode(c, decoder, filepath)
+	//init Counter
+	counter := dump.NewCounter()
+	counter.Count(decoder.Entries)
+
+	topKeyList := counter.GetLargestEntries(keysNums)
+	for i := 0; i < len(topKeyList); i++ {
+		if topKeyList[i].Bytes >= minSize {
+			fmt.Fprintf(c.App.Writer, "%v%s%v%s%v\n", topKeyList[i].Key, keysDelimiter, topKeyList[i].Bytes, keysDelimiter, topKeyList[i].Type)
 		}
 	}
 }
@@ -77,6 +132,12 @@ func main() {
 			Usage:     "get all keys from rdbfile",
 			ArgsUsage: "FILE1 [FILE2] [FILE3]...",
 			Action:    keys,
+		},
+		cli.Command{
+			Name:      "topkey",
+			Usage:     "get the top list of key size from rdbfile",
+			ArgsUsage: "RDBFILE | RDBFILE TOPNUMS | RDBFILE TOPNUMS MINSIZE | RDBFILE DELIMITER TOPNUMS STDOUTFILE",
+			Action:    topkey,
 		},
 	}
 	app.CommandNotFound = func(c *cli.Context, command string) {
